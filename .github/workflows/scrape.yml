@@ -4,12 +4,17 @@ on:
   schedule:
     - cron: '0 13,14,15,16 * * *'  # 1PM, 2PM, 3PM, 4PM UTC
   workflow_dispatch:
+    inputs:
+      force_send_email:
+        description: 'Send email even if no new data was added'
+        type: boolean
+        default: false
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
@@ -19,4 +24,5 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           RESEND_KEY: ${{ secrets.RESEND_KEY }}
+          FORCE_SEND_EMAIL: ${{ inputs.force_send_email || 'false' }}
         run: uv run python main.py

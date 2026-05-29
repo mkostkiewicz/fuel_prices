@@ -353,8 +353,9 @@ def generate_report_and_send(supabase):
 def main():
     supabase = get_supabase_client()
     new_data_added = scrape_and_store(supabase)
+    force_email = os.environ.get('FORCE_SEND_EMAIL', 'false').lower() == 'true'
 
-    if new_data_added:
+    if new_data_added or force_email:
         generate_report_and_send(supabase)
     else:
         print("No new data added. Skipping email.")
