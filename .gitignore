@@ -1,0 +1,22 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Cache
+.mypy_cache/
+
+# Generated files
+fuel_report.png
+
+# Data files (keep templates only)
+xx
+data_rows.csv
+"pb95,pb98,on,data,error_message,copied.csv"
+.vscode/

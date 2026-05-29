@@ -1,0 +1,364 @@
+import os
+import io
+import requests
+from bs4 import BeautifulSoup
+import datetime
+import re
+import base64
+import pandas as pd
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import resend
+from supabase import create_client
+
+MONTHS_PL = {
+    'stycznia': 1, 'lutego': 2, 'marca': 3, 'kwietnia': 4,
+    'maja': 5, 'czerwca': 6, 'lipca': 7, 'sierpnia': 8,
+    'wrzesnia': 9, 'pazdziernika': 10, 'listopada': 11, 'grudnia': 12,
+}
+
+MONTHS_DISPLAY = {
+    1: "stycznia", 2: "lutego", 3: "marca", 4: "kwietnia",
+    5: "maja", 6: "czerwca", 7: "lipca", 8: "sierpnia",
+    9: "września", 10: "października", 11: "listopada", 12: "grudnia",
+}
+
+HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+
+
+def get_supabase_client():
+    url = os.environ['SUPABASE_URL']
+    key = os.environ['SUPABASE_KEY']
+    return create_client(url, key)
+
+
+def get_existing_dates(supabase):
+    response = (
+        supabase.schema('fuel_data')
+        .table('data')
+        .select('price_date')
+        .execute()
+    )
+    return {row['price_date'] for row in response.data}
+
+
+def save_to_supabase(supabase, records):
+    rows = [
+        {
+            'price_date': r['date'],
+            'price_pb95': r['pb95'],
+            'price_pb98': r['pb98'],
+            'price_on': r['on'],
+        }
+        for r in records
+    ]
+    if rows:
+        response = (
+            supabase.schema('fuel_data')
+            .table('data')
+            .insert(rows)
+            .execute()
+        )
+        print(f"Inserted {len(response.data)} records into Supabase.")
+    else:
+        print("No new records to insert.")
+
+
+def get_urls_from_gov():
+    print("Fetching data from gov.pl...")
+    if datetime.date.today().weekday() in [5, 6, 0]:
+        print("⚠️ Today is a weekend/Monday. Data may not be updated.")
+
+    url = "https://www.gov.pl/web/energia/wiadomosci"
+    try:
+        response = requests.get(url, headers=HEADERS, timeout=10, allow_redirects=True)
+        response.encoding = 'utf-8'
+        soup = BeautifulSoup(response.text, 'html.parser')
+
+        urls = []
+        for title_div in soup.find_all('div', class_='title'):
+            link = title_div.find('a')
+            if link and 'Maksymalna cena detaliczna paliw' in link.get_text():
+                full_url = "https://www.gov.pl" + link['href']
+                urls.append(full_url)
+
+        print(f"Found {len(urls)} fuel price URLs.")
+        return urls
+    except Exception as e:
+        print(f"Error: {e}")
+        return []
+
+
+def parse_dates_from_url(url):
+    slug = url.split('/')[-1]
+
+    if 'okres' in slug:
+        match = re.search(r'(\d{1,2})-(\d{1,2})-([a-z]+)-(\d{4})', slug)
+        if match:
+            day_start = int(match.group(1))
+            day_end = int(match.group(2))
+            month = MONTHS_PL.get(match.group(3))
+            year = int(match.group(4))
+            if month:
+                return [datetime.date(year, month, day) for day in range(day_start, day_end + 1)]
+    else:
+        match = re.search(r'(\d{1,2})-([a-z]+)-(\d{4})', slug)
+        if match:
+            day = int(match.group(1))
+            month = MONTHS_PL.get(match.group(2))
+            year = int(match.group(3))
+            if month:
+                return [datetime.date(year, month, day)]
+
+    return []
+
+
+def scrape_prices_from_url(url):
+    regex_b95 = r"(?i)benzyna\s*95.{0,40}?(\d+[.,]\d{2})"
+    regex_b98 = r"(?i)benzyna\s*98.{0,40}?(\d+[.,]\d{2})"
+    regex_on = r"(?i)olej[u]?\s+nap[ęe]dow.{0,40}?(\d+[.,]\d{2})"
+
+    try:
+        response = requests.get(url, headers=HEADERS, timeout=10)
+        response.encoding = 'utf-8'
+        soup = BeautifulSoup(response.text, 'html.parser')
+        text = soup.get_text()
+
+        pb95 = re.search(regex_b95, text)
+        pb98 = re.search(regex_b98, text)
+        on = re.search(regex_on, text)
+
+        pb95_price = float(pb95.group(1).replace(',', '.')) if pb95 else None
+        pb98_price = float(pb98.group(1).replace(',', '.')) if pb98 else None
+        on_price = float(on.group(1).replace(',', '.')) if on else None
+
+        dates = parse_dates_from_url(url)
+        return [{'date': d.isoformat(), 'pb95': pb95_price, 'pb98': pb98_price, 'on': on_price} for d in dates]
+    except Exception as e:
+        print(f"  Error scraping {url}: {e}")
+        return []
+
+
+def scrape_and_store(supabase):
+    """Scrape new fuel prices and store in Supabase. Returns True if new data was added."""
+    existing_dates = get_existing_dates(supabase)
+    print(f"Already have {len(existing_dates)} dates in database.")
+
+    urls = get_urls_from_gov()
+
+    urls_to_scrape = []
+    for url in urls:
+        dates = parse_dates_from_url(url)
+        if any(d.isoformat() not in existing_dates for d in dates):
+            urls_to_scrape.append(url)
+
+    if not urls_to_scrape:
+        print("All dates already in database. Nothing to scrape.")
+        return False
+
+    print(f"{len(urls_to_scrape)} URLs have new dates to scrape.")
+
+    all_data = []
+    for url in urls_to_scrape:
+        rows = scrape_prices_from_url(url)
+        new_rows = [r for r in rows if r['date'] not in existing_dates]
+        all_data.extend(new_rows)
+
+    if not all_data:
+        print("No new records after filtering.")
+        return False
+
+    print(f"Collected {len(all_data)} new price records.")
+    for row in all_data:
+        print(f"  {row['date']}  PB95={row['pb95']}  PB98={row['pb98']}  ON={row['on']}")
+
+    save_to_supabase(supabase, all_data)
+    return True
+
+
+def get_records_from_supabase(supabase, count=10):
+    response = (
+        supabase.schema('fuel_data')
+        .table('data')
+        .select('price_date, price_pb95, price_pb98, price_on, price_copied')
+        .order('price_date', desc=True)
+        .limit(count)
+        .execute()
+    )
+    return response.data
+
+
+def build_dataframe(records):
+    df = pd.DataFrame(records)
+    df['date'] = pd.to_datetime(df['price_date'])
+    df = df.sort_values('date').set_index('date')
+    df['Petrol 95'] = pd.to_numeric(df['price_pb95'])
+    df['Petrol 98'] = pd.to_numeric(df['price_pb98'])
+    df['Diesel'] = pd.to_numeric(df['price_on'])
+    df['is_copied'] = df['price_copied']
+    return df
+
+
+def generate_chart_base64(df):
+    plt.figure(figsize=(18, 10))
+    colors = {'Petrol 95': '#2ca02c', 'Petrol 98': '#1f77b4', 'Diesel': '#333333'}
+
+    for col in ['Petrol 95', 'Petrol 98', 'Diesel']:
+        plt.plot(df.index, df[col], marker='o', label=col, color=colors[col], linewidth=2, markersize=6)
+
+    for date, row in df.iterrows():
+        is_copied = row['is_copied']
+        bg_color = '#FFCCCC' if is_copied else '#E0E0E0'
+        p95, p98, diesel = row['Petrol 95'], row['Petrol 98'], row['Diesel']
+
+        plt.annotate(f"{p98:.2f}", xy=(date, p98), xytext=(0, 7), textcoords="offset points",
+                    ha='center', fontsize=8, weight='bold',
+                    bbox=dict(boxstyle="round,pad=0.2", fc=bg_color, ec="gray", lw=0.5, alpha=0.9))
+
+        plt.annotate(f"{p95:.2f}", xy=(date, p95), xytext=(0, -14), textcoords="offset points",
+                    ha='center', fontsize=8, weight='bold',
+                    bbox=dict(boxstyle="round,pad=0.2", fc=bg_color, ec="gray", lw=0.5, alpha=0.9))
+
+        plt.annotate(f"{diesel:.2f}", xy=(date, diesel), xytext=(0, 7), textcoords="offset points",
+                    ha='center', fontsize=8, weight='bold',
+                    bbox=dict(boxstyle="round,pad=0.2", fc=bg_color, ec="gray", lw=0.5, alpha=0.9))
+
+    plt.title('Daily maximum retail fuel prices (PLN/liter)', fontsize=16, pad=20)
+    plt.xlabel('Date', fontsize=12)
+    plt.ylabel('Price (PLN)', fontsize=12)
+    plt.grid(True, linestyle='--', alpha=0.5)
+
+    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%d-%m'))
+    plt.gca().xaxis.set_major_locator(mdates.DayLocator(interval=1))
+    plt.gcf().autofmt_xdate()
+
+    plt.ylim(df[['Petrol 95', 'Petrol 98', 'Diesel']].min().min() - 0.15,
+            df[['Petrol 95', 'Petrol 98', 'Diesel']].max().max() + 0.15)
+
+    plt.legend(loc='upper left', fontsize=11)
+    plt.tight_layout()
+
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', dpi=300)
+    plt.close()
+    buf.seek(0)
+    img_base64 = base64.b64encode(buf.read()).decode('utf-8')
+    print("Chart generated in memory.")
+    return img_base64
+
+
+def build_email_subject(df):
+    original_df = df[df['is_copied'] == False]
+    if not original_df.empty:
+        last_date_obj = original_df.index[-1]
+        last_row = original_df.iloc[-1]
+        day_txt = last_date_obj.day
+        month_txt = MONTHS_DISPLAY[last_date_obj.month]
+        price_pb95_txt = f"{last_row['Petrol 95']:.2f}"
+        return f"Ceny paliw na {day_txt} {month_txt} PB95 {price_pb95_txt}"
+    return "Raport cen paliw"
+
+
+def build_html_email(df, chart_base64):
+    title = build_email_subject(df)
+    today = datetime.date.today().strftime('%d.%m.%Y')
+
+    rows_html = ""
+    for date, row in df.iterrows():
+        copied_style = ' style="background-color:#FFF0F0;"' if row['is_copied'] else ''
+        rows_html += f"""<tr{copied_style}>
+            <td style="padding:6px 12px;border:1px solid #ddd;">{date.strftime('%d.%m.%Y')}</td>
+            <td style="padding:6px 12px;border:1px solid #ddd;text-align:right;">{row['Petrol 95']:.2f}</td>
+            <td style="padding:6px 12px;border:1px solid #ddd;text-align:right;">{row['Petrol 98']:.2f}</td>
+            <td style="padding:6px 12px;border:1px solid #ddd;text-align:right;">{row['Diesel']:.2f}</td>
+            <td style="padding:6px 12px;border:1px solid #ddd;text-align:center;">{'✓' if row['is_copied'] else ''}</td>
+        </tr>"""
+
+    html = f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="font-family:Arial,sans-serif;margin:0;padding:20px;background:#f9f9f9;">
+    <div style="max-width:800px;margin:0 auto;background:#fff;border-radius:8px;padding:30px;box-shadow:0 2px 8px rgba(0,0,0,0.1);">
+        <h1 style="color:#333;font-size:22px;margin-bottom:5px;">⛽ Raport cen paliw</h1>
+        <p style="color:#666;font-size:14px;margin-top:0;">{today}</p>
+
+        <div style="background:#f0f7ff;border-left:4px solid #1f77b4;padding:12px 16px;margin:20px 0;border-radius:4px;">
+            <strong style="font-size:16px;">{title}</strong>
+        </div>
+
+        <h2 style="color:#555;font-size:16px;margin-top:30px;">Wykres cen (ostatnie 10 dni)</h2>
+        <img src="cid:chart" alt="Fuel price chart" style="width:100%;max-width:750px;border-radius:4px;margin:10px 0;" />
+
+        <h2 style="color:#555;font-size:16px;margin-top:30px;">Tabela cen (PLN/l)</h2>
+        <table style="border-collapse:collapse;width:100%;font-size:14px;">
+            <thead>
+                <tr style="background:#f5f5f5;">
+                    <th style="padding:8px 12px;border:1px solid #ddd;text-align:left;">Data</th>
+                    <th style="padding:8px 12px;border:1px solid #ddd;text-align:right;">PB95</th>
+                    <th style="padding:8px 12px;border:1px solid #ddd;text-align:right;">PB98</th>
+                    <th style="padding:8px 12px;border:1px solid #ddd;text-align:right;">ON</th>
+                    <th style="padding:8px 12px;border:1px solid #ddd;text-align:center;">Kopia</th>
+                </tr>
+            </thead>
+            <tbody>
+                {rows_html}
+            </tbody>
+        </table>
+
+        <p style="color:#999;font-size:11px;margin-top:30px;border-top:1px solid #eee;padding-top:10px;">
+            Dane pochodzą z: gov.pl/web/energia | Wiersze zaznaczone na różowo to dni bez publikacji (skopiowane z poprzedniego dnia).
+        </p>
+    </div>
+</body>
+</html>"""
+    return html
+
+
+def send_email(html_content, chart_base64, subject):
+    resend.api_key = os.environ['RESEND_KEY']
+
+    r = resend.Emails.send({
+        "from": "onboarding@resend.dev",
+        "to": ["marcin@kostkiewicz.eu"],
+        "subject": subject,
+        "html": html_content,
+        "attachments": [
+            {
+                "filename": "fuel_report.png",
+                "content": chart_base64,
+                "content_id": "chart",
+            }
+        ],
+    })
+    print(f"Email sent via Resend. ID: {r.get('id', r)}")
+
+
+def generate_report_and_send(supabase):
+    records = get_records_from_supabase(supabase, count=10)
+    if not records:
+        print("No records found in database.")
+        return
+
+    df = build_dataframe(records)
+    chart_base64 = generate_chart_base64(df)
+    html_content = build_html_email(df, chart_base64)
+    subject = build_email_subject(df)
+
+    print(f"Subject: {subject}")
+    send_email(html_content, chart_base64, subject)
+
+
+def main():
+    supabase = get_supabase_client()
+    new_data_added = scrape_and_store(supabase)
+
+    if new_data_added:
+        generate_report_and_send(supabase)
+    else:
+        print("No new data added. Skipping email.")
+
+
+if __name__ == "__main__":
+    main()
