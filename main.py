@@ -206,28 +206,28 @@ def generate_chart_base64(df):
     colors = {'Petrol 95': '#2ca02c', 'Petrol 98': '#1f77b4', 'Diesel': '#333333'}
 
     for col in ['Petrol 95', 'Petrol 98', 'Diesel']:
-        plt.plot(df.index, df[col], marker='o', label=col, color=colors[col], linewidth=2, markersize=6)
+        plt.plot(df.index, df[col], marker='o', label=col, color=colors[col], linewidth=3, markersize=8)
 
     for date, row in df.iterrows():
         is_copied = row['is_copied']
-        bg_color = '#FFCCCC' if is_copied else '#E0E0E0'
+        bg_color = "#F8E518" if is_copied else "#FFFFFF"
         p95, p98, diesel = row['Petrol 95'], row['Petrol 98'], row['Diesel']
 
-        plt.annotate(f"{p98:.2f}", xy=(date, p98), xytext=(0, 7), textcoords="offset points",
-                    ha='center', fontsize=8, weight='bold',
-                    bbox=dict(boxstyle="round,pad=0.2", fc=bg_color, ec="gray", lw=0.5, alpha=0.9))
+        plt.annotate(f"{p98:.2f}", xy=(date, p98), xytext=(0, 10), textcoords="offset points",
+                    ha='center', fontsize=22, weight='bold',
+                    bbox=dict(boxstyle="round,pad=0.3", fc=bg_color, ec="gray", lw=0.5, alpha=0.9))
 
-        plt.annotate(f"{p95:.2f}", xy=(date, p95), xytext=(0, -14), textcoords="offset points",
-                    ha='center', fontsize=8, weight='bold',
-                    bbox=dict(boxstyle="round,pad=0.2", fc=bg_color, ec="gray", lw=0.5, alpha=0.9))
+        plt.annotate(f"{p95:.2f}", xy=(date, p95), xytext=(0, -18), textcoords="offset points",
+                    ha='center', fontsize=22, weight='bold',
+                    bbox=dict(boxstyle="round,pad=0.3", fc=bg_color, ec="gray", lw=0.5, alpha=0.9))
 
-        plt.annotate(f"{diesel:.2f}", xy=(date, diesel), xytext=(0, 7), textcoords="offset points",
-                    ha='center', fontsize=8, weight='bold',
-                    bbox=dict(boxstyle="round,pad=0.2", fc=bg_color, ec="gray", lw=0.5, alpha=0.9))
+        plt.annotate(f"{diesel:.2f}", xy=(date, diesel), xytext=(0, 10), textcoords="offset points",
+                    ha='center', fontsize=22, weight='bold',
+                    bbox=dict(boxstyle="round,pad=0.4", fc=bg_color, ec="gray", lw=0.5, alpha=0.9))
 
-    plt.title('Daily maximum retail fuel prices (PLN/liter)', fontsize=16, pad=20)
-    plt.xlabel('Date', fontsize=12)
-    plt.ylabel('Price (PLN)', fontsize=12)
+    plt.title('Daily maximum retail fuel prices (PLN/liter)', fontsize=20, pad=20)
+    plt.xlabel('Date', fontsize=14)
+    plt.ylabel('Price (PLN)', fontsize=14)
     plt.grid(True, linestyle='--', alpha=0.5)
 
     plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%d-%m'))
@@ -237,7 +237,8 @@ def generate_chart_base64(df):
     plt.ylim(df[['Petrol 95', 'Petrol 98', 'Diesel']].min().min() - 0.15,
             df[['Petrol 95', 'Petrol 98', 'Diesel']].max().max() + 0.15)
 
-    plt.legend(loc='upper left', fontsize=11)
+    plt.legend(loc='upper left', fontsize=14)
+    plt.tick_params(axis='both', labelsize=12)
     plt.tight_layout()
 
     buf = io.BytesIO()
@@ -266,14 +267,13 @@ def build_html_email(df, chart_base64):
     today = datetime.date.today().strftime('%d.%m.%Y')
 
     rows_html = ""
-    for date, row in df.iterrows():
+    for date, row in df.iloc[::-1].iterrows():
         copied_style = ' style="background-color:#FFF0F0;"' if row['is_copied'] else ''
         rows_html += f"""<tr{copied_style}>
             <td style="padding:6px 12px;border:1px solid #ddd;">{date.strftime('%d.%m.%Y')}</td>
             <td style="padding:6px 12px;border:1px solid #ddd;text-align:right;">{row['Petrol 95']:.2f}</td>
             <td style="padding:6px 12px;border:1px solid #ddd;text-align:right;">{row['Petrol 98']:.2f}</td>
             <td style="padding:6px 12px;border:1px solid #ddd;text-align:right;">{row['Diesel']:.2f}</td>
-            <td style="padding:6px 12px;border:1px solid #ddd;text-align:center;">{'✓' if row['is_copied'] else ''}</td>
         </tr>"""
 
     html = f"""<!DOCTYPE html>
@@ -288,7 +288,7 @@ def build_html_email(df, chart_base64):
             <strong style="font-size:16px;">{title}</strong>
         </div>
 
-        <h2 style="color:#555;font-size:16px;margin-top:30px;">Wykres cen (ostatnie 10 dni)</h2>
+        <h2 style="color:#555;font-size:16px;margin-top:30px;">Wykres cen za ostatnie dni</h2>
         <img src="cid:chart" alt="Fuel price chart" style="width:100%;max-width:750px;border-radius:4px;margin:10px 0;" />
 
         <h2 style="color:#555;font-size:16px;margin-top:30px;">Tabela cen (PLN/l)</h2>
@@ -299,7 +299,6 @@ def build_html_email(df, chart_base64):
                     <th style="padding:8px 12px;border:1px solid #ddd;text-align:right;">PB95</th>
                     <th style="padding:8px 12px;border:1px solid #ddd;text-align:right;">PB98</th>
                     <th style="padding:8px 12px;border:1px solid #ddd;text-align:right;">ON</th>
-                    <th style="padding:8px 12px;border:1px solid #ddd;text-align:center;">Kopia</th>
                 </tr>
             </thead>
             <tbody>
@@ -320,7 +319,7 @@ def send_email(html_content, chart_base64, subject):
     resend.api_key = os.environ['RESEND_KEY']
 
     r = resend.Emails.send({
-        "from": "onboarding@resend.dev",
+        "from": "marcin.kostkiewicz@resend.dev",
         "to": ["marcin@kostkiewicz.eu"],
         "subject": subject,
         "html": html_content,
