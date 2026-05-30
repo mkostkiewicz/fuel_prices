@@ -1,8 +1,9 @@
 name: Scrape Fuel Prices
 
 on:
-  schedule:
-    - cron: '21 6-19 * * *'
+  # scripts triggered by https://console.cron-job.org/jobs
+  # schedule:
+    # - cron: '21 6-19 * * *'
   workflow_dispatch:
     inputs:
       force_send_email:
