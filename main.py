@@ -85,6 +85,9 @@ def get_urls_from_gov():
                 urls.append(full_url)
 
         print(f"Found {len(urls)} fuel price URLs.")
+        if urls:
+            for u in urls:
+                print(f"  - {u}")
         return urls
     except Exception as e:
         print(f"Error: {e}")
@@ -93,21 +96,44 @@ def get_urls_from_gov():
 
 def parse_dates_from_url(url):
     slug = url.split('/')[-1]
-
+    # Handle ranges in the slug. There are a few formats observed on gov.pl:
+    # - same-month range: '23-25-maja-2026'
+    # - multi-month range: '30-maja--1-czerwca-2026' (note the double hyphen)
+    # Try same-month first, then a multi-month range fallback.
     if 'okres' in slug:
-        match = re.search(r'(\d{1,2})-(\d{1,2})-([a-z]+)-(\d{4})', slug)
+        # same-month range: start-end-month-year
+        match = re.search(r"(\d{1,2})-(\d{1,2})-([a-ząćęłńóśżź]+)-(\d{4})", slug, re.IGNORECASE)
         if match:
             day_start = int(match.group(1))
             day_end = int(match.group(2))
-            month = MONTHS_PL.get(match.group(3))
+            month = MONTHS_PL.get(match.group(3).lower())
             year = int(match.group(4))
             if month:
                 return [datetime.date(year, month, day) for day in range(day_start, day_end + 1)]
+
+        # multi-month range: day1-month1--day2-month2-year (allow one or more hyphens)
+        match2 = re.search(r"(\d{1,2})-([a-ząćęłńóśżź]+)-+(\d{1,2})-([a-ząćęłńóśżź]+)-(\d{4})", slug, re.IGNORECASE)
+        if match2:
+            day1 = int(match2.group(1))
+            month1 = MONTHS_PL.get(match2.group(2).lower())
+            day2 = int(match2.group(3))
+            month2 = MONTHS_PL.get(match2.group(4).lower())
+            year = int(match2.group(5))
+            if month1 and month2:
+                start = datetime.date(year, month1, day1)
+                end = datetime.date(year, month2, day2)
+                # build inclusive list of dates between start and end
+                dates = []
+                cur = start
+                while cur <= end:
+                    dates.append(cur)
+                    cur = cur + datetime.timedelta(days=1)
+                return dates
     else:
-        match = re.search(r'(\d{1,2})-([a-z]+)-(\d{4})', slug)
+        match = re.search(r"(\d{1,2})-([a-ząćęłńóśżź]+)-(\d{4})", slug, re.IGNORECASE)
         if match:
             day = int(match.group(1))
-            month = MONTHS_PL.get(match.group(2))
+            month = MONTHS_PL.get(match.group(2).lower())
             year = int(match.group(3))
             if month:
                 return [datetime.date(year, month, day)]
@@ -159,10 +185,18 @@ def scrape_and_store(supabase):
         return False
 
     print(f"{len(urls_to_scrape)} URLs have new dates to scrape.")
+    
 
     all_data = []
     for url in urls_to_scrape:
         rows = scrape_prices_from_url(url)
+        # Print whatever the scraper returned for this URL
+        print(f"Results from URL {url} was found:")
+        if rows:
+            for r in rows:
+                print(f"  {r['date']}  PB95={r['pb95']}  PB98={r['pb98']}  ON={r['on']}")
+        else:
+            print("  No results from this URL.")
         new_rows = [r for r in rows if r['date'] not in existing_dates]
         all_data.extend(new_rows)
 
@@ -258,7 +292,7 @@ def build_email_subject(df):
         day_txt = last_date_obj.day
         month_txt = MONTHS_DISPLAY[last_date_obj.month]
         price_pb95_txt = f"{last_row['Petrol 95']:.2f}"
-        return f"Ceny paliw na {day_txt} {month_txt} PB95 {price_pb95_txt}"
+        return f"Ceny paliw obowiązujące do {day_txt} {month_txt} dla PB95 {price_pb95_txt}"
     return "Raport cen paliw"
 
 
@@ -358,6 +392,18 @@ def main():
         generate_report_and_send(supabase)
     else:
         print("No new data added. Skipping email.")
+
+    # Show last 5 entries from the database in the terminal
+    try:
+        last_records = get_records_from_supabase(supabase, count=5)
+        if last_records:
+            print("\nLast 5 records from database:")
+            for r in last_records:
+                print(f"  {r.get('price_date')}  PB95={r.get('price_pb95')}  PB98={r.get('price_pb98')}  ON={r.get('price_on')}  copied={r.get('price_copied')}")
+        else:
+            print("No records found in database.")
+    except Exception as e:
+        print(f"Error fetching last records: {e}")
 
 
 if __name__ == "__main__":
