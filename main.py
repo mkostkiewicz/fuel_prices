@@ -84,7 +84,7 @@ def get_urls_from_gov():
                 full_url = "https://www.gov.pl" + link['href']
                 urls.append(full_url)
 
-        print(f"Found {len(urls)} fuel price URLs.")
+        print(f"Found {len(urls)} URLs with fuel price information on the first page.")
         if urls:
             for u in urls:
                 print(f"  - {u}")

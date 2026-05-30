@@ -2,8 +2,7 @@ name: Scrape Fuel Prices
 
 on:
   schedule:
-    # Runs every hour at minute 0 from 07:00 through 19:00 (UTC). Adjust if you need local timezone.
-    - cron: '0 6-19 * * *'
+    - cron: '21 6-19 * * *'
   workflow_dispatch:
     inputs:
       force_send_email:
