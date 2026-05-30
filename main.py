@@ -12,6 +12,8 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import resend
 from supabase import create_client
+from dotenv import load_dotenv
+load_dotenv()
 
 MONTHS_PL = {
     'stycznia': 1, 'lutego': 2, 'marca': 3, 'kwietnia': 4,
@@ -384,6 +386,7 @@ def generate_report_and_send(supabase):
 
 
 def main():
+    print("Starting fuel price scraper and reporter...")
     supabase = get_supabase_client()
     new_data_added = scrape_and_store(supabase)
     force_email = os.environ.get('FORCE_SEND_EMAIL', 'false').lower() == 'true'
