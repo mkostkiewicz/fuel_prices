@@ -4,7 +4,7 @@ Small utility that scrapes the Polish government energy page for the daily maxim
 
 **Key features**
 - Scrapes `gov.pl/web/energia` for posts titled “Maksymalna cena detaliczna paliw” and parses price values for PB95, PB98 and ON.
-- Stores new daily records in a Supabase table `fuel_data.data`.
+- Stores new daily records in a Supabase table configured in `database_config.yaml` (default: `fuel_data.data`).
 - Generates a PNG chart and an HTML email report (with an embedded chart) and sends it using Resend.
 
 ## Requirements
@@ -36,10 +36,10 @@ pip install beautifulsoup4 matplotlib pandas requests resend supabase
 The script expects the following environment variables to be set:
 
 - `SUPABASE_URL` — your Supabase project URL
-- `SUPABASE_KEY` — your Supabase anon or service key with write access to the `fuel_data.data` table
+- `SUPABASE_KEY` — your Supabase anon or service key with write access to the database table
 - `RESEND_KEY` — API key for Resend (used to send the report email)
-- `EMAIL_FROM` — your email resend domain email
-- `EMAIL_TO` — email recipient
+- `EMAIL_FROM` — example: Sender <report@resend.com>
+- `EMAIL_TO` — example: recipent1@example.com, recipent2@example.com
 - (optional) `FORCE_SEND_EMAIL` — set to `true` to force sending the email even if no new data were scraped
 
 Example (macOS / Linux):
@@ -116,7 +116,7 @@ What `main.py` does:
 - If new records were inserted (or `FORCE_SEND_EMAIL=true`), generates a chart, builds an HTML report and sends it via Resend to the configured address in the code.
 
 ## Supabase table expectations
-The code writes into the `fuel_data.data` table with columns at least matching:
+The code writes into the Supabase table configured in `database_config.yaml` (see key `supabase_fuel_data_table`). By default this is `fuel_data.data`. The table should have columns at least matching:
 - `price_date` (ISO date string)
 - `price_pb95` (numeric)
 - `price_pb98` (numeric)

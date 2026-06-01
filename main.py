@@ -1,7 +1,8 @@
 import os
 import io
-import requests
+import requests\
 from bs4 import BeautifulSoup
+import yaml
 import datetime
 import re
 import base64
@@ -14,6 +15,35 @@ import resend
 from supabase import create_client
 from dotenv import load_dotenv
 load_dotenv()
+
+def load_db_config(path='database_config.yaml'):
+    """Load schema/table values using PyYAML if available, otherwise fallback.
+    Returns dict {'schema':..., 'table':...} with sensible defaults.
+    """
+    defaults = {'schema': 'fuel_data', 'table': 'data'}
+    
+    try:
+        with open(path, 'r', encoding='utf-8') as fh:
+            parsed = yaml.safe_load(fh) or {}
+    except FileNotFoundError:
+        return defaults
+    except Exception:
+        return defaults
+
+    if isinstance(parsed, dict):
+        if 'supabase_fuel_data_table' in parsed and isinstance(parsed['supabase_fuel_data_table'], dict):
+            node = parsed['supabase_fuel_data_table']
+            return {'schema': node.get('schema', defaults['schema']), 'table': node.get('table', defaults['table'])}
+        if 'supabase' in parsed and isinstance(parsed['supabase'], dict):
+            node = parsed['supabase']
+            return {'schema': node.get('schema', defaults['schema']), 'table': node.get('table', defaults['table'])}
+        if 'schema' in parsed and 'table' in parsed:
+            return {'schema': parsed.get('schema', defaults['schema']), 'table': parsed.get('table', defaults['table'])}
+
+    return defaults
+
+# Load DB schema/table config once
+DB_CONFIG = load_db_config()
 
 MONTHS_PL = {
     'stycznia': 1, 'lutego': 2, 'marca': 3, 'kwietnia': 4,
@@ -38,8 +68,8 @@ def get_supabase_client():
 
 def get_existing_dates(supabase):
     response = (
-        supabase.schema('fuel_data')
-        .table('data')
+        supabase.schema(DB_CONFIG['schema'])
+        .table(DB_CONFIG['table'])
         .select('price_date')
         .execute()
     )
@@ -58,8 +88,8 @@ def save_to_supabase(supabase, records):
     ]
     if rows:
         response = (
-            supabase.schema('fuel_data')
-            .table('data')
+            supabase.schema(DB_CONFIG['schema'])
+            .table(DB_CONFIG['table'])
             .insert(rows)
             .execute()
         )
@@ -213,8 +243,8 @@ def scrape_and_store(supabase):
 
 def get_records_from_supabase(supabase, count=10):
     response = (
-        supabase.schema('fuel_data')
-        .table('data')
+        supabase.schema(DB_CONFIG['schema'])
+        .table(DB_CONFIG['table'])
         .select('created_at, price_date, price_pb95, price_pb98, price_on')
         .order('price_date', desc=True)
         .limit(count)
@@ -359,21 +389,22 @@ def build_html_email(df, chart_base64):
 
 def send_email(html_content, chart_base64, subject):
     resend.api_key = os.environ['RESEND_KEY']
+    for recipient in os.environ['EMAIL_TO'].split(','):
 
-    r = resend.Emails.send({
-        "from": os.environ.get('EMAIL_FROM'),
-        "to": os.environ.get('EMAIL_TO'),
-        "subject": subject,
-        "html": html_content,
-        "attachments": [
-            {
-                "filename": "fuel_report.png",
-                "content": chart_base64,
-                "content_id": "chart",
-            }
-        ],
-    })
-    print(f"Email sent via Resend. ID: {r.get('id', r)}")
+        r = resend.Emails.send({
+            "from": os.environ.get('EMAIL_FROM'),
+            "to": recipient.strip(),
+            "subject": subject,
+            "html": html_content,
+            "attachments": [
+                {
+                    "filename": "fuel_report.png",
+                    "content": chart_base64,
+                    "content_id": "chart",
+                }
+            ],
+        })
+        print(f"Email sent to {recipient.strip()} via Resend. ID: {r.get('id', r)}")
 
 
 def generate_report_and_send(supabase):
