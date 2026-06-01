@@ -1,6 +1,6 @@
 import os
 import io
-import requests\
+import requests
 from bs4 import BeautifulSoup
 import yaml
 import datetime
