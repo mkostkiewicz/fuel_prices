@@ -285,7 +285,7 @@ def generate_chart_base64(df):
 def build_email_subject(df):
     # Match SQL logic: among the recent rows, use only those with the latest created_at
     if df.empty:
-        return "Raport cen paliw"
+        return "Brak ostatnich cen paliw w bazie danych"
 
     if 'created_at' in df.columns and not df['created_at'].isna().all():
         max_created = df['created_at'].max()

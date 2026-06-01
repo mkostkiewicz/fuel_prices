@@ -9,7 +9,7 @@ Small utility that scrapes the Polish government energy page for the daily maxim
 
 ## Requirements
 - Python 3.13 or newer
-- The dependencies listed in `pyproject.toml`: `beautifulsoup4`, `matplotlib`, `pandas`, `requests`, `resend`, `supabase`.
+- The dependencies listed in `pyproject.toml`: `beautifulsoup4`, `matplotlib`, `pandas`, `requests`, `resend`, `supabase`, `dotenv`.
 
 ## Install
 This project can use the `uv` package manager (https://uv.run) to install dependencies from `pyproject.toml`.
@@ -38,6 +38,8 @@ The script expects the following environment variables to be set:
 - `SUPABASE_URL` — your Supabase project URL
 - `SUPABASE_KEY` — your Supabase anon or service key with write access to the `fuel_data.data` table
 - `RESEND_KEY` — API key for Resend (used to send the report email)
+- `EMAIL_FROM` — your email resend domain email
+- `EMAIL_TO` — email recipient
 - (optional) `FORCE_SEND_EMAIL` — set to `true` to force sending the email even if no new data were scraped
 
 Example (macOS / Linux):
@@ -46,6 +48,8 @@ Example (macOS / Linux):
 export SUPABASE_URL="https://your-project.supabase.co"
 export SUPABASE_KEY="your-supabase-key"
 export RESEND_KEY="your-resend-key"
+export EMAIL_FROM="from@example.com"
+export EMAIL_TO="to@example.com"
 export FORCE_SEND_EMAIL=false
 ```
 
@@ -55,6 +59,8 @@ Windows (PowerShell) — temporary for current session:
 $env:SUPABASE_URL = "https://your-project.supabase.co"
 $env:SUPABASE_KEY = "your-supabase-key"
 $env:RESEND_KEY = "your-resend-key"
+$env:EMAIL_FROM="from@example.com"
+$env:EMAIL_TO="to@example.com"
 $env:FORCE_SEND_EMAIL = "false"
 ```
 
@@ -64,6 +70,8 @@ Windows (PowerShell) — persistent (use `setx` to write to user environment):
 setx SUPABASE_URL "https://your-project.supabase.co"
 setx SUPABASE_KEY "your-supabase-key"
 setx RESEND_KEY "your-resend-key"
+setx EMAIL_FROM="from@example.com"
+setx EMAIL_TO="to@example.com"
 setx FORCE_SEND_EMAIL "false"
 ```
 
@@ -75,6 +83,8 @@ You can store environment variables in a `.env` file in the project root. Exampl
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_KEY=your-supabase-key
 RESEND_KEY=your-resend-key
+EMAIL_FROM="from@example.com"
+EMAIL_TO="to@example.com"
 FORCE_SEND_EMAIL=false
 ```
 
@@ -116,13 +126,7 @@ The code writes into the `fuel_data.data` table with columns at least matching:
 Adjust your Supabase schema/permissions as needed before running.
 
 ## Scheduling
-This script is intended to be run periodically (daily). You can schedule it with cron, a systemd timer, or run it from a cloud scheduler / CI (GitHub Actions, cron job on a VM, etc.).
-
-Example cron entry (run daily at 09:00):
-
-```cron
-0 9 * * * cd /path/to/fuel_prices && /path/to/.venv/bin/python main.py >> /var/log/fuel_prices.log 2>&1
-```
+This script is intended to be run periodically (daily). Due to gitgub limit and restrictions to trigger the job is using [cron-job.com](https://console.cron-job.org/jobs) service
 
 ## Development notes
 - The parser includes heuristics for Polish month names and several slug formats used on `gov.pl` announcement URLs.
