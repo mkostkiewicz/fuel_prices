@@ -27,5 +27,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           RESEND_KEY: ${{ secrets.RESEND_KEY }}
+          EMAIL_FROM: ${{ vars.EMAIL_FROM }}
+          EMAIL_TO: ${{ vars.EMAIL_TO }}
           FORCE_SEND_EMAIL: ${{ inputs.force_send_email || 'false' }}
         run: uv run python main.py

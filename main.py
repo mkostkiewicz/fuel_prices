@@ -70,9 +70,6 @@ def save_to_supabase(supabase, records):
 
 def get_urls_from_gov():
     print("Fetching data from gov.pl...")
-    if datetime.date.today().weekday() in [5, 6, 0]:
-        print("⚠️ Today is a weekend/Monday. Data may not be updated.")
-
     url = "https://www.gov.pl/web/energia/wiadomosci"
     try:
         response = requests.get(url, headers=HEADERS, timeout=10, allow_redirects=True)
@@ -218,7 +215,7 @@ def get_records_from_supabase(supabase, count=10):
     response = (
         supabase.schema('fuel_data')
         .table('data')
-        .select('price_date, price_pb95, price_pb98, price_on, price_copied')
+        .select('created_at, price_date, price_pb95, price_pb98, price_on')
         .order('price_date', desc=True)
         .limit(count)
         .execute()
@@ -230,10 +227,10 @@ def build_dataframe(records):
     df = pd.DataFrame(records)
     df['date'] = pd.to_datetime(df['price_date'])
     df = df.sort_values('date').set_index('date')
+    df['created_at'] = pd.to_datetime(df['created_at'])
     df['Petrol 95'] = pd.to_numeric(df['price_pb95'])
     df['Petrol 98'] = pd.to_numeric(df['price_pb98'])
     df['Diesel'] = pd.to_numeric(df['price_on'])
-    df['is_copied'] = df['price_copied']
     return df
 
 
@@ -245,8 +242,7 @@ def generate_chart_base64(df):
         plt.plot(df.index, df[col], marker='o', label=col, color=colors[col], linewidth=3, markersize=8)
 
     for date, row in df.iterrows():
-        is_copied = row['is_copied']
-        bg_color = "#F8E518" if is_copied else "#FFFFFF"
+        bg_color = "#FFFFFF"
         p95, p98, diesel = row['Petrol 95'], row['Petrol 98'], row['Diesel']
 
         plt.annotate(f"{p98:.2f}", xy=(date, p98), xytext=(0, 10), textcoords="offset points",
@@ -287,15 +283,26 @@ def generate_chart_base64(df):
 
 
 def build_email_subject(df):
-    original_df = df[df['is_copied'] == False]
-    if not original_df.empty:
-        last_date_obj = original_df.index[-1]
-        last_row = original_df.iloc[-1]
-        day_txt = last_date_obj.day
-        month_txt = MONTHS_DISPLAY[last_date_obj.month]
-        price_pb95_txt = f"{last_row['Petrol 95']:.2f}"
-        return f"Ceny paliw obowiązujące do {day_txt} {month_txt} dla PB95 {price_pb95_txt}"
-    return "Raport cen paliw"
+    # Match SQL logic: among the recent rows, use only those with the latest created_at
+    if df.empty:
+        return "Raport cen paliw"
+
+    if 'created_at' in df.columns and not df['created_at'].isna().all():
+        max_created = df['created_at'].max()
+        subset = df[df['created_at'] == max_created]
+        if not subset.empty:
+            start = subset.index.min()
+            end = subset.index.max()
+        else:
+            start = df.index.min()
+            end = df.index.max()
+    else:
+        start = df.index.min()
+        end = df.index.max()
+
+    start_txt = f"{start.day} {MONTHS_DISPLAY[start.month]} {start.year}"
+    end_txt = f"{end.day} {MONTHS_DISPLAY[end.month]} {end.year}"
+    return f"Ceny paliw obowiązują od {start_txt} do {end_txt}"
 
 
 def build_html_email(df, chart_base64):
@@ -304,8 +311,7 @@ def build_html_email(df, chart_base64):
 
     rows_html = ""
     for date, row in df.iloc[::-1].iterrows():
-        copied_style = ' style="background-color:#FFF0F0;"' if row['is_copied'] else ''
-        rows_html += f"""<tr{copied_style}>
+        rows_html += f"""<tr>
             <td style="padding:6px 12px;border:1px solid #ddd;">{date.strftime('%d.%m.%Y')}</td>
             <td style="padding:6px 12px;border:1px solid #ddd;text-align:right;">{row['Petrol 95']:.2f}</td>
             <td style="padding:6px 12px;border:1px solid #ddd;text-align:right;">{row['Petrol 98']:.2f}</td>
@@ -355,8 +361,8 @@ def send_email(html_content, chart_base64, subject):
     resend.api_key = os.environ['RESEND_KEY']
 
     r = resend.Emails.send({
-        "from": "marcin.kostkiewicz@resend.dev",
-        "to": ["marcin@kostkiewicz.eu"],
+        "from": os.environ.get('EMAIL_FROM'),
+        "to": os.environ.get('EMAIL_TO'),
         "subject": subject,
         "html": html_content,
         "attachments": [
@@ -388,6 +394,7 @@ def generate_report_and_send(supabase):
 def main():
     print("Starting fuel price scraper and reporter...")
     supabase = get_supabase_client()
+    
     new_data_added = scrape_and_store(supabase)
     force_email = os.environ.get('FORCE_SEND_EMAIL', 'false').lower() == 'true'
 
@@ -402,7 +409,7 @@ def main():
         if last_records:
             print("\nLast 5 records from database:")
             for r in last_records:
-                print(f"  {r.get('price_date')}  PB95={r.get('price_pb95')}  PB98={r.get('price_pb98')}  ON={r.get('price_on')}  copied={r.get('price_copied')}")
+                print(f"  {r.get('price_date')}  PB95={r.get('price_pb95')}  PB98={r.get('price_pb98')}  ON={r.get('price_on')}")
         else:
             print("No records found in database.")
     except Exception as e:
