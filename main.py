@@ -175,6 +175,10 @@ def scrape_prices_from_url(url):
     regex_b98 = r"(?i)benzyna\s*98.{0,40}?(\d+[.,]\d{2})"
     regex_on = r"(?i)olej[u]?\s+nap[ęe]dow.{0,40}?(\d+[.,]\d{2})"
 
+    pb95_price = None
+    pb98_price = None
+    on_price = None
+
     try:
         response = requests.get(url, headers=HEADERS, timeout=10)
         response.encoding = 'utf-8'
@@ -188,12 +192,11 @@ def scrape_prices_from_url(url):
         pb95_price = float(pb95.group(1).replace(',', '.')) if pb95 else None
         pb98_price = float(pb98.group(1).replace(',', '.')) if pb98 else None
         on_price = float(on.group(1).replace(',', '.')) if on else None
-
-        dates = parse_dates_from_url(url)
-        return [{'date': d.isoformat(), 'pb95': pb95_price, 'pb98': pb98_price, 'on': on_price} for d in dates]
     except Exception as e:
         print(f"  Error scraping {url}: {e}")
-        return []
+
+    dates = parse_dates_from_url(url)
+    return [{'date': d.isoformat(), 'pb95': pb95_price, 'pb98': pb98_price, 'on': on_price} for d in dates]
 
 
 def scrape_and_store(supabase):
@@ -332,7 +335,7 @@ def build_email_subject(df):
 
     start_txt = f"{start.day} {MONTHS_DISPLAY[start.month]} {start.year}"
     end_txt = f"{end.day} {MONTHS_DISPLAY[end.month]} {end.year}"
-    return f"Ceny paliw obowiązują od {start_txt} do {end_txt}"
+    return f"Najnowszy raport cen paliw, uwzględniający dane od {start_txt} do {end_txt}"
 
 
 def build_html_email(df, chart_base64):
