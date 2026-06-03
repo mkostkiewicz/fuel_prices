@@ -125,48 +125,50 @@ def get_urls_from_gov():
 
 def parse_dates_from_url(url):
     slug = url.split('/')[-1]
-    # Handle ranges in the slug. There are a few formats observed on gov.pl:
-    # - same-month range: '23-25-maja-2026'
-    # - multi-month range: '30-maja--1-czerwca-2026' (note the double hyphen)
-    # Try same-month first, then a multi-month range fallback.
-    if 'okres' in slug:
-        # same-month range: start-end-month-year
-        match = re.search(r"(\d{1,2})-(\d{1,2})-([a-ząćęłńóśżź]+)-(\d{4})", slug, re.IGNORECASE)
-        if match:
-            day_start = int(match.group(1))
-            day_end = int(match.group(2))
-            month = MONTHS_PL.get(match.group(3).lower())
-            year = int(match.group(4))
-            if month:
-                return [datetime.date(year, month, day) for day in range(day_start, day_end + 1)]
+    # Handle ranges and single dates in the slug. Gov.pl uses several formats, for
+    # example:
+    # - same-month range: '...-23-25-maja-2026-...'
+    # - multi-month range: '...-30-maja--1-czerwca-2026-...'
+    # - single day: '...-5-czerwca-2026-...'
+    # Try patterns in order: same-month range, multi-month range, single day.
+    s = slug.lower()
 
-        # multi-month range: day1-month1--day2-month2-year (allow one or more hyphens)
-        match2 = re.search(r"(\d{1,2})-([a-ząćęłńóśżź]+)-+(\d{1,2})-([a-ząćęłńóśżź]+)-(\d{4})", slug, re.IGNORECASE)
-        if match2:
-            day1 = int(match2.group(1))
-            month1 = MONTHS_PL.get(match2.group(2).lower())
-            day2 = int(match2.group(3))
-            month2 = MONTHS_PL.get(match2.group(4).lower())
-            year = int(match2.group(5))
-            if month1 and month2:
-                start = datetime.date(year, month1, day1)
-                end = datetime.date(year, month2, day2)
-                # build inclusive list of dates between start and end
-                dates = []
-                cur = start
-                while cur <= end:
-                    dates.append(cur)
-                    cur = cur + datetime.timedelta(days=1)
-                return dates
-    else:
-        match = re.search(r"(\d{1,2})-([a-ząćęłńóśżź]+)-(\d{4})", slug, re.IGNORECASE)
-        if match:
-            day = int(match.group(1))
-            month = MONTHS_PL.get(match.group(2).lower())
-            year = int(match.group(3))
-            if month:
-                return [datetime.date(year, month, day)]
+    # same-month range: start-end-month-year (e.g. 4-5-czerwca-2026)
+    match = re.search(r"(\d{1,2})[-–](\d{1,2})-([a-ząćęłńóśżź]+)-(\d{4})", s, re.IGNORECASE)
+    if match:
+        day_start = int(match.group(1))
+        day_end = int(match.group(2))
+        month = MONTHS_PL.get(match.group(3).lower())
+        year = int(match.group(4))
+        if month:
+            return [datetime.date(year, month, day) for day in range(day_start, day_end + 1)]
 
+    # multi-month range: day1-month1--day2-month2-year (allow one or more hyphens)
+    match2 = re.search(r"(\d{1,2})-([a-ząćęłńóśżź]+)-+(\d{1,2})-([a-ząćęłńóśżź]+)-(\d{4})", s, re.IGNORECASE)
+    if match2:
+        day1 = int(match2.group(1))
+        month1 = MONTHS_PL.get(match2.group(2).lower())
+        day2 = int(match2.group(3))
+        month2 = MONTHS_PL.get(match2.group(4).lower())
+        year = int(match2.group(5))
+        if month1 and month2:
+            start = datetime.date(year, month1, day1)
+            end = datetime.date(year, month2, day2)
+            dates = []
+            cur = start
+            while cur <= end:
+                dates.append(cur)
+                cur = cur + datetime.timedelta(days=1)
+            return dates
+
+    # single day: day-month-year (e.g. 5-czerwca-2026)
+    match3 = re.search(r"(\d{1,2})-([a-ząćęłńóśżź]+)-(\d{4})", s, re.IGNORECASE)
+    if match3:
+        day = int(match3.group(1))
+        month = MONTHS_PL.get(match3.group(2).lower())
+        year = int(match3.group(3))
+        if month:
+            return [datetime.date(year, month, day)]
     return []
 
 
